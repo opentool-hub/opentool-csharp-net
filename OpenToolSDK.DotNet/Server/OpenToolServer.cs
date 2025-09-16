@@ -1,4 +1,9 @@
-﻿using OpenToolSDK.DotNet.Daemon;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using OpenToolSDK.DotNet.Daemon;
 using OpenToolSDK.DotNet.Tool;
 using System.Net;
 
@@ -39,79 +44,51 @@ public class OpenToolServer : IServer
 
     public async Task Start()
     {
-        try
-        {
-            ToolRegistry.ToolInstance = _tool;
-            ToolRegistry.Version = _version;
+        ToolRegistry.ToolInstance = _tool;
+        ToolRegistry.Version = _version;
 
-            _host = Host.CreateDefaultBuilder()
-                .ConfigureLogging(logging =>
-                {
-                    logging.ClearProviders();
-                    logging.AddConsole();
-                    logging.SetMinimumLevel(LogLevel.Warning);
-                })
-                .ConfigureWebHostDefaults(webBuilder =>
-                {
-                    webBuilder.UseKestrel()
-                        .UseUrls($"http://{_ip}:{_port}")
-                        .ConfigureServices(services =>
+        _host = Host.CreateDefaultBuilder()
+            .ConfigureLogging(logging =>
+            {
+                logging.ClearProviders();
+                logging.AddConsole();
+                logging.SetMinimumLevel(LogLevel.Warning); // 只输出 Warning 以上
+            })
+            .ConfigureWebHostDefaults(webBuilder =>
+            {
+                webBuilder.UseKestrel()
+                    .UseUrls($"http://{_ip}:{_port}")
+                    .ConfigureServices(services =>
+                    {
+                        services.AddSingleton(_tool);
+                        services.AddControllers();
+
+                        if (_apiKeys.Count > 0)
                         {
-                            services.AddSingleton<ITool>(_tool);
-                            services.AddControllers();
-
-                            if (_apiKeys.Count > 0)
-                            {
-                                services.AddSingleton<IEnumerable<string>>(_apiKeys);
-                            }
-                        })
-                        .Configure(app =>
+                            services.AddSingleton<IEnumerable<string>>(_apiKeys);
+                        }
+                    })
+                    .Configure(app =>
+                    {
+                        if (_apiKeys.Count > 0)
                         {
-                            if (_apiKeys.Count > 0)
-                            {
-                                app.UseMiddleware<AuthorizationMiddleware>(_apiKeys);
-                            }
+                            app.UseMiddleware<AuthorizationMiddleware>(_apiKeys);
+                        }
 
-                            app.UseRouting();
-                            app.UseEndpoints(endpoints =>
-                            {
-                                endpoints.MapControllers();
-                            });
+                        app.UseRouting();
+                        app.UseEndpoints(endpoints =>
+                        {
+                            endpoints.MapControllers();
                         });
-                })
-                .Build();
+                    });
+            })
+            .Build();
 
-            await _host.StartAsync();
+        await _host.StartAsync();
 
-            Console.WriteLine($"Start Server: http://{_ip}:{_port}{_prefix}");
+        Console.WriteLine($"[OpenToolSDK] Server started: http://{_ip}:{_port}{_prefix}");
 
-            var registerInfo = new RegisterInfo(
-                File: System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "unknown",
-                Host: IPAddress.Loopback.ToString(),
-                Port: _port,
-                Prefix: _prefix,
-                ApiKeys: _apiKeys,
-                Pid: Environment.ProcessId
-            );
-
-            var client = new DaemonClient();
-            var result = await client.Register(registerInfo);
-
-            if (!string.IsNullOrEmpty(result.Error))
-            {
-                Console.WriteLine($"WARNING: Register to daemon failed. ({result.Error})");
-                Console.WriteLine("Tool Running in SOLO mode.");
-            }
-            else
-            {
-                Console.WriteLine($"Register to daemon successfully, id: {result.Id}, pid: {registerInfo.Pid}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to start server: {ex}");
-            throw;
-        }
+        await RegisterToDaemon();
     }
 
     public async Task Stop()
@@ -120,7 +97,32 @@ public class OpenToolServer : IServer
         {
             await _host.StopAsync();
             _host.Dispose();
-            Console.WriteLine("Server stopped.");
+            Console.WriteLine("[OpenToolSDK] Server stopped.");
+        }
+    }
+
+    private async Task RegisterToDaemon()
+    {
+        var registerInfo = new RegisterInfo(
+            File: System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "unknown",
+            Host: IPAddress.Loopback.ToString(),
+            Port: _port,
+            Prefix: _prefix,
+            ApiKeys: _apiKeys,
+            Pid: Environment.ProcessId
+        );
+
+        var client = new DaemonClient();
+        var result = await client.Register(registerInfo);
+
+        if (!string.IsNullOrEmpty(result.Error))
+        {
+            Console.WriteLine($"[OpenToolSDK] WARNING: Register to daemon failed. ({result.Error})");
+            Console.WriteLine("[OpenToolSDK] Tool running in SOLO mode.");
+        }
+        else
+        {
+            Console.WriteLine($"[OpenToolSDK] Registered to daemon successfully, id: {result.Id}, pid: {registerInfo.Pid}");
         }
     }
 }
