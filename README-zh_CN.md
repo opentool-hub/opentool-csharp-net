@@ -4,6 +4,8 @@
 
 OpenTool 的 .NET SDK，支持 JSON-RPC 协议的 Tool Server 与 Client，实现了 OpenTool 规范中的核心能力。
 
+如果你需要使用 .NET Framework 4.8.1 ，请使用[opentool-csharp-netfx](http://github.com/opentool-hub/opentool-csharp-netfx) 。
+
 ## 功能
 
 * OpenTool JSON 解析器
